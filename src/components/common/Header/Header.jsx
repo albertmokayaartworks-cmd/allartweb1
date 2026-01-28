@@ -8,9 +8,7 @@ import {
   FiUser, 
   FiSearch,
   FiMenu,
-  FiX,
-  FiStore,
-  FiChevronDown
+  FiX
 } from 'react-icons/fi';
 import { useAuth } from '../../../context/AuthContext';
 import { useCart } from '../../../context/CartContext';
@@ -18,6 +16,7 @@ import { useLogoSettings } from '../../../hooks/useLogoSettings';
 import { signOutUser } from '../../../services/firebase/auth';
 import { getProducts } from '../../../services/firebase/firestoreHelpers';
 import { CATEGORIES } from '../../../utils/constants';
+import { renderIcon } from '../../../utils/iconHelpers';
 import NotificationBell from './NotificationBell';
 import './Header.css';
 
@@ -211,11 +210,10 @@ const Header = () => {
                             <hr className="my-2" />
                             <Link
                               to="/vendor/dashboard"
-                              className="block px-3 sm:px-4 py-2 hover:bg-gray-100 text-green-600 font-semibold text-sm flex items-center gap-2"
+                              className="block px-3 sm:px-4 py-2 hover:bg-gray-100 text-green-600 font-semibold text-sm"
                               onClick={() => setUserMenuOpen(false)}
                             >
-                              <FiStore size={18} />
-                              Vendor Dashboard
+                              🏪 Vendor Dashboard
                             </Link>
                           </>
                         )}
@@ -324,8 +322,7 @@ const Header = () => {
             </li>
             <li className="relative group">
               <button type="button" className="hover:text-orange-500 flex items-center gap-1 py-1 pointer-events-auto bg-none border-none cursor-pointer font-inherit text-inherit">
-                More Categories
-                <FiChevronDown size={16} />
+                More Categories ▼
               </button>
               <div className="absolute left-0 mt-0 w-40 sm:w-48 bg-white rounded-md shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50 top-full pointer-events-none group-hover:pointer-events-auto overflow-y-auto" style={{ maxHeight: '300px' }}>
                 {CATEGORIES.slice(5).map((category) => (
@@ -337,7 +334,7 @@ const Header = () => {
                   >
                     {category.name}
                   </button>
-                ))}}
+                ))}
               </div>
             </li>
           </ul>
@@ -354,10 +351,11 @@ const Header = () => {
                 <li key={category.id}>
                   <Link
                     to={`/products?category=${category.id}`}
-                    className="block hover:text-orange-500 py-2 text-sm"
+                    className="block hover:text-orange-500 py-2 text-sm flex items-center gap-2"
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    {category.icon} {category.name}
+                    {renderIcon(category.icon, 16)}
+                    {category.name}
                   </Link>
                 </li>
               ))}

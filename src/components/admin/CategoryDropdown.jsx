@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiChevronDown, FiSearch } from 'react-icons/fi';
 import { CATEGORIES } from '../../utils/constants';
+import { renderIcon } from '../../utils/iconHelpers';
 
 const CategoryDropdown = ({ value, onChange, required = false }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -37,7 +38,7 @@ const CategoryDropdown = ({ value, onChange, required = false }) => {
         <span className="flex items-center gap-2">
           {selectedCategory ? (
             <>
-              <span>{selectedCategory.icon}</span>
+              {renderIcon(selectedCategory.icon, 18)}
               <span>{selectedCategory.name}</span>
             </>
           ) : (
@@ -87,7 +88,7 @@ const CategoryDropdown = ({ value, onChange, required = false }) => {
                     value === category.id ? 'bg-orange-100 text-orange-700 font-semibold' : ''
                   }`}
                 >
-                  <span className="text-lg">{category.icon}</span>
+                  {renderIcon(category.icon, 18)}
                   <span className="flex-1">{category.name}</span>
                   {value === category.id && (
                     <span className="text-orange-600">✓</span>

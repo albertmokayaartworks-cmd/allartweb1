@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FiTrendingUp, FiDollarSign, FiShoppingCart, FiUsers, FiDownload, FiBarChart2, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import { useNotifications } from '../../context/NotificationContext';
+import FinanceAdjustments from './FinanceAdjustments/FinanceAdjustments';
+import { getAllAdjustments, calculateTotalAdjustments } from '../../services/finance/adjustmentService';
 
 const FinanceAnalytics = ({ orders = [], products = [] }) => {
   const { addNotification } = useNotifications();
@@ -9,6 +11,8 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
     totalCommission: 0,
     totalProfit: 0,
     sellerPayouts: 0,
+    totalAdjustments: 0,
+    adjustedRevenue: 0,
     monthlyRevenue: [],
     orderStats: {
       total: 0,
@@ -20,6 +24,8 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
     },
     topProducts: []
   });
+  const [adjustments, setAdjustments] = useState([]);
+  const [loadingAdjustments, setLoadingAdjustments] = useState(false);
 
   const [selectedPeriod, setSelectedPeriod] = useState('all');
   const currencySymbol = 'KES';
@@ -27,7 +33,21 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
 
   useEffect(() => {
     calculateFinancials();
+    fetchAdjustments();
   }, [orders, products, selectedPeriod]);
+
+  const fetchAdjustments = async () => {
+    try {
+      setLoadingAdjustments(true);
+      const data = await getAllAdjustments();
+      setAdjustments(data);
+    } catch (error) {
+      console.error('Error fetching adjustments:', error);
+      addNotification('Failed to load adjustments', 'error');
+    } finally {
+      setLoadingAdjustments(false);
+    }
+  };
 
   const filterOrdersByPeriod = (orders) => {
     if (selectedPeriod === 'all') return orders;
@@ -116,11 +136,23 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
         amount
       }));
 
+    // Calculate total adjustments (approved and applied only)
+    const approvedAdjustments = adjustments.filter(adj => adj.status === 'approved' || adj.status === 'applied');
+    const totalAdjustments = approvedAdjustments.reduce((sum, adj) => sum + parseFloat(adj.amount || 0), 0);
+    
+    // Calculate adjusted revenue (accounts for refunds/returns)
+    const adjustedRevenue = totalRevenue - totalAdjustments;
+    const adjustedCommission = adjustedRevenue * commissionRate;
+    const adjustedSellerPayouts = adjustedRevenue * (1 - commissionRate);
+    const adjustedProfit = adjustedCommission;
+
     setFinancialData({
       totalRevenue,
-      totalCommission,
-      totalProfit,
-      sellerPayouts,
+      totalCommission: adjustedCommission,
+      totalProfit: adjustedProfit,
+      sellerPayouts: adjustedSellerPayouts,
+      totalAdjustments,
+      adjustedRevenue,
       monthlyRevenue,
       orderStats,
       topProducts
@@ -639,8 +671,14 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
         />
         <MetricCard 
           icon={FiTrendingUp}
-          label="Platform Profit"
-          value={formatCurrency(financialData.totalProfit)}
+          label="Adjustments"
+          value={formatCurrency(financialData.totalAdjustments)}
+          color="red"
+        />
+        <MetricCard 
+          icon={FiTrendingUp}
+          label="Adjusted Revenue"
+          value={formatCurrency(financialData.adjustedRevenue)}
           color="green"
         />
         <MetricCard 
@@ -651,8 +689,8 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
         />
         <MetricCard 
           icon={FiShoppingCart}
-          label="Commission (4%)"
-          value={formatCurrency(financialData.totalCommission)}
+          label="Platform Profit"
+          value={formatCurrency(financialData.totalProfit)}
           color="purple"
         />
       </div>
@@ -726,6 +764,12 @@ const FinanceAnalytics = ({ orders = [], products = [] }) => {
           </div>
         </div>
       )}
+
+      {/* Finance Adjustments */}
+      <FinanceAdjustments 
+        adjustments={adjustments}
+        onAdjustmentsChange={fetchAdjustments}
+      />
 
       {/* Finance Summary */}
       <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-lg shadow-md p-8 text-white">

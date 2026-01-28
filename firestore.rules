@@ -2,125 +2,384 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // ==================== HELPER FUNCTIONS ====================
-    
-    // Check if user is admin
-    function isAdmin() {
-      return request.auth != null && 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true;
-    }
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
     
     // Check if user is authenticated
-    function isAuth() {
+    function isAuthenticated() {
       return request.auth != null;
     }
     
-    // Get current user ID
-    function userId() {
-      return request.auth.uid;
+    // Check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
     }
     
-    // ==================== PUBLIC COLLECTIONS ====================
-    
-    // Products - publicly readable
-    match /products/{productId} {
-      allow read: if true;
-      allow create: if isAdmin();
-      allow update, delete: if isAdmin();
+    // Check if user is vendor
+    function isVendor() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isVendor', false) == true;
     }
     
-    // Categories - publicly readable
-    match /categories/{categoryId} {
-      allow read: if true;
-      allow write: if isAdmin();
+    // Check if user owns the resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Reviews - publicly readable, users can create their own
-    match /reviews/{reviewId} {
-      allow read: if true;
-      allow create: if isAuth();
-      allow update, delete: if isAuth() && resource.data.userId == userId();
+    // Get current user data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
-    // ==================== USER COLLECTIONS ====================
-    
-    // Users - own data readable/writable, admin can read all
-    match /users/{uid} {
-      allow read: if isAuth() && (userId() == uid || isAdmin());
-      allow write: if isAuth() && userId() == uid;
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    match /users/{userId} {
+      // Users can read/write their own data
+      allow read, write: if isOwner(userId);
+      
+      // Admins can read all user data and update
+      allow read: if isAdmin();
       allow update: if isAdmin();
     }
     
-    // ==================== ORDER COLLECTIONS ====================
-    
-    // Orders - users can read their own, admins can read all
-    match /orders/{orderId} {
-      allow read: if isAuth() && (resource.data.userId == userId() || isAdmin());
-      allow create: if isAuth();
-      allow update, delete: if isAdmin() || (isAuth() && resource.data.userId == userId());
+    // ============================================
+    // BLOG POSTS COLLECTION - VENDOR DASHBOARD
+    // ============================================
+    match /blog_posts/{postId} {
+      
+      // ---- CREATE (POST) ----
+      // Vendors can create new blog posts
+      allow create: if isVendor() && 
+                       request.resource.data.vendorId == request.auth.uid &&
+                       request.resource.data.title is string &&
+                       request.resource.data.title.size() > 0 &&
+                       request.resource.data.content is string &&
+                       request.resource.data.content.size() > 0 &&
+                       request.resource.data.category is string &&
+                       request.resource.data.get('status', 'pending') == 'pending';
+      
+      // ---- READ (GET/LIST) ----
+      // Vendors can read their own posts (approved or pending)
+      allow read: if isVendor() && resource.data.vendorId == request.auth.uid;
+      
+      // Admins can read all posts (for moderation)
+      allow read: if isAdmin();
+      
+      // Public can read only approved posts
+      allow read: if resource.data.get('status', 'pending') == 'approved';
+      
+      // ---- UPDATE (PATCH) ----
+      // Vendors can update their own PENDING posts before approval
+      allow update: if isVendor() && 
+                       resource.data.vendorId == request.auth.uid &&
+                       resource.data.get('status', 'pending') == 'pending' &&
+                       // Prevent modifying vendor ID and status
+                       request.resource.data.vendorId == resource.data.vendorId &&
+                       request.resource.data.get('status', 'pending') == resource.data.get('status', 'pending') &&
+                       // Validate title and content
+                       request.resource.data.title is string &&
+                       request.resource.data.title.size() > 0 &&
+                       request.resource.data.content is string &&
+                       request.resource.data.content.size() > 0;
+      
+      // Admins can update post status (approve/reject)
+      allow update: if isAdmin();
+      
+      // ---- DELETE ----
+      // Vendors can delete their own pending posts only
+      allow delete: if isVendor() && 
+                       resource.data.vendorId == request.auth.uid &&
+                       resource.data.get('status', 'pending') == 'pending';
+      
+      // Admins can delete any post
+      allow delete: if isAdmin();
     }
     
-    // ==================== VENDOR COLLECTIONS ====================
+    // ============================================
+    // COMMENTS SUBCOLLECTION
+    // ============================================
+    match /blog_posts/{postId}/comments/{commentId} {
+      
+      // ---- CREATE ----
+      // Authenticated users can create comments
+      allow create: if isAuthenticated() &&
+                      request.resource.data.content is string &&
+                      request.resource.data.content.size() > 0 &&
+                      request.resource.data.content.size() <= 1000 &&
+                      request.resource.data.authorId == request.auth.uid;
+      
+      // ---- READ ----
+      // Anyone can read all comments
+      allow read: if true;
+      
+      // ---- UPDATE ----
+      // Admins can approve/reject comments
+      allow update: if isAdmin();
+      
+      // ---- DELETE ----
+      // Users can delete their own comments
+      allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+      
+      // Admins can delete any comment
+      allow delete: if isAdmin();
+    }
     
-    // Vendor Applications - users can read their own, admins can read/write all
-    match /vendor_applications/{appId} {
-      allow read: if isAuth() && (resource.data.userId == userId() || isAdmin());
-      allow create: if isAuth();
+    // ============================================
+    // ACCOUNTING ADJUSTMENTS COLLECTION
+    // ============================================
+    match /accounting_adjustments/{docId} {
+      
+      // Admins can create adjustments (for returns, cancellations, corrections)
+      allow create: if isAdmin() &&
+                       request.resource.data.type is string &&
+                       ['refund', 'return', 'cancellation', 'correction', 'discount', 'fee'].hasAny([request.resource.data.type]) &&
+                       request.resource.data.amount is number &&
+                       request.resource.data.reason is string &&
+                       request.resource.data.reason.size() > 0 &&
+                       request.resource.data.orderId is string &&
+                       request.resource.data.orderId.size() > 0;
+      
+      // Admins can read all adjustments (for Financial Analytics tab)
+      allow read: if isAdmin();
+      
+      // Admins can update adjustments (edit reason, status, etc.)
+      allow update: if isAdmin() &&
+                       // Prevent changing critical fields after creation
+                       request.resource.data.amount == resource.data.amount &&
+                       request.resource.data.orderId == resource.data.orderId &&
+                       request.resource.data.type == resource.data.type &&
+                       // Allow updating reason, notes, and status
+                       request.resource.data.reason is string &&
+                       request.resource.data.reason.size() > 0;
+      
+      // Admins can delete adjustments
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // PRODUCTS COLLECTION
+    // ============================================
+    match /products/{productId} {
+      
+      // Anyone can read products
+      allow read: if true;
+      
+      // Vendors can create products
+      allow create: if isVendor() &&
+                       request.resource.data.vendorId == request.auth.uid &&
+                       request.resource.data.name is string &&
+                       request.resource.data.name.size() > 0 &&
+                       request.resource.data.price is number &&
+                       request.resource.data.price >= 0;
+      
+      // Vendors can update/delete their own products
+      allow update, delete: if isVendor() && 
+                               resource.data.vendorId == request.auth.uid;
+      
+      // Admins can manage all products
       allow update, delete: if isAdmin();
     }
     
-    // Vendor products - vendors can read/write their own, users can read, admins full access
+    // ============================================
+    // VENDOR PRODUCTS COLLECTION
+    // ============================================
     match /vendor_products/{productId} {
+      
+      // Public can read vendor products
       allow read: if true;
-      allow create: if isAuth() && (request.resource.data.vendorId == userId() || isAdmin());
-      allow update, delete: if isAdmin() || (isAuth() && resource.data.vendorId == userId());
+      
+      // Vendors can create/update/delete their own products
+      allow create, update, delete: if isVendor() &&
+                                       request.resource.data.vendorId == request.auth.uid;
+      
+      // Admins can manage all vendor products
+      allow update, delete: if isAdmin();
     }
     
-    // ==================== EMAIL & NOTIFICATION COLLECTIONS ====================
-    
-    // Admin emails - admin only
-    match /admin_emails/{emailId} {
-      allow read, write: if isAdmin();
-    }
-    
-    // Notifications - users can read their own, admins can read all and create
-    match /notifications/{notificationId} {
-      allow read: if isAuth() && (resource.data.userId == userId() || isAdmin());
-      allow create: if isAdmin();
-      allow update, delete: if isAuth() && resource.data.userId == userId();
-    }
-    
-    // ==================== SETTINGS & CONFIGURATION ====================
-    
-    // Settings - public read, admin write
-    match /settings/{document=**} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-    
-    // Email templates - admin only
-    match /emailTemplates/{templateId} {
+    // ============================================
+    // VENDOR APPLICATIONS COLLECTION
+    // ============================================
+    match /vendor_applications/{appId} {
+      
+      // Users can read their own applications
+      allow read: if isOwner(resource.data.userId);
+      
+      // Admins can read all applications
       allow read: if isAdmin();
+      
+      // Users can create applications
+      allow create: if isAuthenticated() &&
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Admins can update application status (approve/reject)
+      allow update: if isAdmin();
+      
+      // Admins can delete applications
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // ORDERS COLLECTION
+    // ============================================
+    match /orders/{orderId} {
+      
+      // Users can read their own orders
+      allow read: if isOwner(resource.data.userId);
+      
+      // Admins can read all orders
+      allow read: if isAdmin();
+      
+      // Customers can create orders
+      allow create: if isAuthenticated() &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.items is list &&
+                       request.resource.data.items.size() > 0 &&
+                       request.resource.data.totalAmount is number &&
+                       request.resource.data.totalAmount > 0;
+      
+      // Admins can update order status
+      allow update: if isAdmin();
+      
+      // Users cannot delete orders (admins can)
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // ADMIN EMAILS COLLECTION
+    // ============================================
+    match /admin_emails/{emailId} {
+      
+      // Admins can read admin emails
+      allow read: if isAdmin();
+      
+      // System/backend can create emails (or admins)
+      allow create: if isAdmin();
+      
+      // Only admins can update/delete
+      allow update, delete: if isAdmin();
+    }
+    
+    // ============================================
+    // NOTIFICATIONS COLLECTION
+    // ============================================
+    match /notifications/{notificationId} {
+      
+      // Users can read their own notifications
+      allow read: if isOwner(resource.data.userId);
+      
+      // Admins can read all notifications
+      allow read: if isAdmin();
+      
+      // System can create notifications
+      allow create: if isAuthenticated();
+      
+      // Users can update their own notifications (mark as read)
+      allow update: if isOwner(resource.data.userId);
+      
+      // Users can delete their own notifications
+      allow delete: if isOwner(resource.data.userId);
+    }
+    
+    // ============================================
+    // REVIEWS COLLECTION
+    // ============================================
+    match /reviews/{reviewId} {
+      
+      // Anyone can read reviews
+      allow read: if true;
+      
+      // Authenticated users can create reviews
+      allow create: if isAuthenticated();
+      
+      // Users can update/delete their own reviews
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Admins can delete any review
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // CATEGORIES COLLECTION (READ ONLY)
+    // ============================================
+    match /categories/{categoryId} {
+      
+      // Anyone can read categories
+      allow read: if true;
+      
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // EMAIL TEMPLATES COLLECTION
+    // ============================================
+    match /emailTemplates/{templateId} {
+      
+      // Anyone can read templates (for displaying)
+      allow read: if true;
+      
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+
+    // ============================================
+    // SETTINGS COLLECTION (LOGO & BRANDING)
+    // ============================================
+    match /settings/{settingId} {
+      
+      // Anyone can read settings (logo, branding)
+      allow read: if true;
+      
+      // Only admins can write settings
       allow write: if isAdmin();
     }
     
-    // ==================== CART (Temporary) ====================
-    
-    // Shopping carts - users own their cart
-    match /carts/{uid} {
-      allow read, write: if isAuth() && userId() == uid;
+    // ============================================
+    // CART COLLECTION (TEMPORARY)
+    // ============================================
+    match /carts/{userId} {
+      
+      // Users can read/write their own cart
+      allow read, write: if isOwner(userId);
     }
     
-    // ==================== WISHLIST ====================
-    
-    // Wishlists - users own their wishlist
-    match /wishlists/{uid} {
-      allow read, write: if isAuth() && userId() == uid;
+    // ============================================
+    // WISHLIST COLLECTION
+    // ============================================
+    match /wishlists/{userId} {
+      
+      // Users can read/write their own wishlist
+      allow read, write: if isOwner(userId);
     }
     
-    // ==================== DENY ALL OTHER COLLECTIONS ====================
+    // ============================================
+    // FLASH SALES COLLECTION
+    // ============================================
+    match /flashSales/{saleId} {
+      
+      // Anyone can read flash sales
+      allow read: if true;
+      
+      // Only admins can create/update/delete
+      allow create, update, delete: if isAdmin();
+    }
     
-    // Default deny all
+    // ============================================
+    // PRODUCT REVIEWS SUBCOLLECTION
+    // ============================================
+    match /products/{productId}/reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // DENY ALL BY DEFAULT
+    // ============================================
     match /{document=**} {
       allow read, write: if false;
     }

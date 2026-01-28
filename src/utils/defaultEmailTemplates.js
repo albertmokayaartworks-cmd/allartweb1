@@ -491,7 +491,7 @@ export const DEFAULT_EMAIL_TEMPLATES = {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🏪 New Vendor Application</h1>
+              <h1>📦 New Vendor Application</h1>
             </div>
             <div class="content">
               <div class="alert">

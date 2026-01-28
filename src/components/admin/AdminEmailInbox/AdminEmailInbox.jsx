@@ -274,12 +274,12 @@ export default function AdminEmailInbox() {
 
   const getEmailTypeLabel = (type) => {
     const labels = {
-      vendor_application: '🏪 Vendor App',
-      order: '📦 Order',
-      general: '📧 General',
-      draft: '✏️ Draft'
+      vendor_application: 'Vendor App',
+      order: 'Order',
+      general: 'General',
+      draft: 'Draft'
     };
-    return labels[type] || '📧 ' + (type || 'General');
+    return labels[type] || (type || 'General');
   };
 
   return (

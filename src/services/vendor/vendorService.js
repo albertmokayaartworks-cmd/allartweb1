@@ -805,16 +805,12 @@ export const sendAdminVendorApplicationNotification = async (appData, applicatio
       .replace(/\{\{businessName\}\}/g, businessName);
 
     // Send email via Brevo
-    const emailPayload = {
-      to: [{
-        email: adminEmail,
-        name: 'Admin'
-      }],
+    const sendResult = await sendBrevEmail({
+      email: adminEmail,
       subject,
-      htmlContent
-    };
-
-    const sendResult = await sendBrevEmail(emailPayload);
+      htmlContent,
+      senderName: 'Aruviah Vendor Team'
+    });
     
     // Save to admin inbox regardless of Brevo result (for internal storage)
     await saveEmailToAdminInbox({
